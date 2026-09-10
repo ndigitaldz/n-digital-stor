@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
-import { getProductById } from "@/lib/products";
 import { useCart } from "@/lib/cart-context";
 import { supabase } from "@/lib/supabase";
 
@@ -48,12 +47,6 @@ export default function ProductPage({
 
   const [added, setAdded] = useState(false);
 
-  /*
-   * تحميل المنتج من Supabase
-   *
-   * وإذا لم نجده هناك نستخدم المنتج القديم
-   * الموجود في lib/products.ts.
-   */
   useEffect(() => {
     async function loadProduct() {
       setLoading(true);
@@ -64,44 +57,63 @@ export default function ProductPage({
         .eq("id", id)
         .maybeSingle();
 
-      if (!error && data) {
-        const loadedProduct =
-          data as ProductWithImages;
-
-        setProduct(loadedProduct);
-
-        const images =
-          Array.isArray(loadedProduct.images) &&
-          loadedProduct.images.length > 0
-            ? loadedProduct.images
-            : loadedProduct.image
-              ? [loadedProduct.image]
-              : [];
-
-        setSelectedImage(images[0] || "");
-      } else {
-        /*
-         * توافق مع المنتجات القديمة
-         */
-        const oldProduct =
-          getProductById(id) as ProductWithImages | undefined;
-
-        if (oldProduct) {
-          setProduct(oldProduct);
-
-          const images =
-            Array.isArray(oldProduct.images) &&
-            oldProduct.images.length > 0
-              ? oldProduct.images
-              : oldProduct.image
-                ? [oldProduct.image]
-                : [];
-
-          setSelectedImage(images[0] || "");
-        } else {
-          setProduct(null);
-        }
+      if (error) {
+        console.error("خطأ في تحميل المنتج:", error);
+        setProduct(null);
+        setLoading(false);
+        return;
       }
+
+      if (!data) {
+        setProduct(null);
+        setLoading(false);
+        return;
+      }
+
+      const loadedProduct: ProductWithImages = {
+        id: String(data.id),
+        name: data.name ?? "",
+        category: data.category ?? "",
+        categoryName:
+          data.categoryName ??
+          data.category_name ??
+          "",
+        price: Number(data.price ?? 0),
+        oldPrice:
+          data.oldPrice != null
+            ? Number(data.oldPrice)
+            : data.old_price != null
+              ? Number(data.old_price)
+              : undefined,
+        image: data.image ?? "",
+        images:
+          Array.isArray(data.images)
+            ? data.images
+            : [],
+        description: data.description ?? "",
+        features:
+          Array.isArray(data.features)
+            ? data.features
+            : [],
+        rating: Number(data.rating ?? 0),
+        reviews: Number(data.reviews ?? 0),
+        stock: Number(data.stock ?? 0),
+        badge: data.badge ?? undefined,
+      };
+
+      setProduct(loadedProduct);
+
+      const images =
+        Array.isArray(loadedProduct.images) &&
+        loadedProduct.images.length > 0
+          ? loadedProduct.images
+          : loadedProduct.image
+            ? [loadedProduct.image]
+            : [];
+
+      setSelectedImage(images[0] || "");
+
+      setQuantity(1);
 
       setLoading(false);
     }
@@ -109,9 +121,6 @@ export default function ProductPage({
     loadProduct();
   }, [id]);
 
-  /*
-   * أثناء تحميل المنتج
-   */
   if (loading) {
     return (
       <main
@@ -133,21 +142,22 @@ export default function ProductPage({
     );
   }
 
-  /*
-   * المنتج غير موجود
-   */
   if (!product) {
     return (
       <main
         dir="rtl"
         className="flex min-h-screen items-center justify-center bg-[#f7f8fa] px-5"
       >
-        <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center">
+        <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center shadow-sm">
           <div className="text-6xl">🔍</div>
 
           <h1 className="mt-5 text-2xl font-black">
             المنتج غير موجود
           </h1>
+
+          <p className="mt-3 text-sm text-slate-400">
+            هذا المنتج لم يعد متوفرًا في المتجر.
+          </p>
 
           <Link
             href="/"
@@ -160,12 +170,6 @@ export default function ProductPage({
     );
   }
 
-  /*
-   * تجهيز صور المنتج
-   *
-   * المنتجات الجديدة تستخدم images[]
-   * والمنتجات القديمة تستخدم image
-   */
   const productImages =
     Array.isArray(product.images) &&
     product.images.length > 0
@@ -174,25 +178,26 @@ export default function ProductPage({
         ? [product.image]
         : [];
 
-  /*
-   * في حال عدم وجود صورة محددة
-   * نستخدم أول صورة
-   */
   const mainImage =
     selectedImage ||
     productImages[0] ||
     product.image ||
     "";
 
-  const discount = product.oldPrice
-    ? Math.round(
-        ((product.oldPrice - product.price) /
-          product.oldPrice) *
-          100
-      )
-    : 0;
+  const discount =
+    product.oldPrice && product.oldPrice > product.price
+      ? Math.round(
+          ((product.oldPrice - product.price) /
+            product.oldPrice) *
+            100
+        )
+      : 0;
 
   const handleAddToCart = () => {
+    if (product.stock <= 0) {
+      return;
+    }
+
     addToCart(product, quantity);
 
     setAdded(true);
@@ -203,7 +208,12 @@ export default function ProductPage({
   };
 
   const handleBuyNow = () => {
+    if (product.stock <= 0) {
+      return;
+    }
+
     addToCart(product, quantity);
+
     window.location.href = "/cart";
   };
 
@@ -212,9 +222,7 @@ export default function ProductPage({
       dir="rtl"
       className="min-h-screen bg-[#f7f8fa] text-slate-900"
     >
-      {/* ================================================= */}
       {/* HEADER */}
-      {/* ================================================= */}
 
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-20 max-w-7xl items-center px-5 lg:px-8">
@@ -251,9 +259,7 @@ export default function ProductPage({
         </div>
       </header>
 
-      {/* ================================================= */}
       {/* BREADCRUMB */}
-      {/* ================================================= */}
 
       <div className="mx-auto max-w-7xl px-5 pt-7 lg:px-8">
         <div className="text-sm text-slate-400">
@@ -279,22 +285,16 @@ export default function ProductPage({
         </div>
       </div>
 
-      {/* ================================================= */}
       {/* PRODUCT */}
-      {/* ================================================= */}
 
       <section className="mx-auto max-w-7xl px-5 py-8 lg:px-8 lg:py-12">
         <div className="grid gap-8 lg:grid-cols-2">
 
-          {/* ================================================= */}
           {/* الصور */}
-          {/* ================================================= */}
 
           <div>
             <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
               <div className="relative flex min-h-[450px] items-center justify-center bg-slate-50 p-6">
-
-                {/* الشارات */}
 
                 <div className="absolute right-5 top-5 z-10 flex gap-2">
                   {product.badge && (
@@ -310,8 +310,6 @@ export default function ProductPage({
                   )}
                 </div>
 
-                {/* الصورة الرئيسية */}
-
                 {mainImage ? (
                   <img
                     src={mainImage}
@@ -326,9 +324,7 @@ export default function ProductPage({
               </div>
             </div>
 
-            {/* ================================================= */}
             {/* الصور المصغرة */}
-            {/* ================================================= */}
 
             {productImages.length > 1 && (
               <div className="mt-4">
@@ -370,11 +366,10 @@ export default function ProductPage({
             )}
           </div>
 
-          {/* ================================================= */}
           {/* معلومات المنتج */}
-          {/* ================================================= */}
 
           <div className="flex flex-col justify-center">
+
             <p className="text-sm font-bold text-slate-400">
               {product.categoryName}
             </p>
@@ -400,23 +395,22 @@ export default function ProductPage({
             <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
               <div className="flex items-end gap-3">
                 <span className="text-4xl font-black">
-                  {product.price.toLocaleString(
-                    "ar-DZ"
-                  )}
+                  {product.price.toLocaleString("ar-DZ")}
                 </span>
 
                 <span className="mb-1 font-bold">
                   دج
                 </span>
 
-                {product.oldPrice && (
-                  <span className="mb-1 text-sm text-slate-400 line-through">
-                    {product.oldPrice.toLocaleString(
-                      "ar-DZ"
-                    )}{" "}
-                    دج
-                  </span>
-                )}
+                {product.oldPrice &&
+                  product.oldPrice > product.price && (
+                    <span className="mb-1 text-sm text-slate-400 line-through">
+                      {product.oldPrice.toLocaleString(
+                        "ar-DZ"
+                      )}{" "}
+                      دج
+                    </span>
+                  )}
               </div>
             </div>
 
@@ -535,40 +529,43 @@ export default function ProductPage({
         </div>
       </section>
 
-      {/* ================================================= */}
       {/* المواصفات */}
-      {/* ================================================= */}
 
       <section className="border-t border-slate-200 bg-white py-16">
         <div className="mx-auto max-w-7xl px-5 lg:px-8">
+
           <h2 className="text-2xl font-black">
             مواصفات المنتج
           </h2>
 
-          <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {product.features.map(
-              (feature, index) => (
-                <div
-                  key={`${feature}-${index}`}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-sm font-bold text-white">
-                    {index + 1}
-                  </div>
+          {product.features.length > 0 ? (
+            <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {product.features.map(
+                (feature, index) => (
+                  <div
+                    key={`${feature}-${index}`}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-sm font-bold text-white">
+                      {index + 1}
+                    </div>
 
-                  <p className="mt-4 text-sm font-bold">
-                    {feature}
-                  </p>
-                </div>
-              )
-            )}
-          </div>
+                    <p className="mt-4 text-sm font-bold">
+                      {feature}
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+          ) : (
+            <p className="mt-5 text-sm text-slate-400">
+              لا توجد مواصفات إضافية لهذا المنتج.
+            </p>
+          )}
         </div>
       </section>
 
-      {/* ================================================= */}
       {/* FOOTER */}
-      {/* ================================================= */}
 
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto max-w-7xl px-5 py-8 text-center text-xs text-slate-400">
